@@ -868,3 +868,7 @@ details.reveal-words[open] > summary { margin-bottom: var(--s2); }
 .report-msg { margin: var(--s2) 0 0; min-height: 1.4em; }
 .report-msg.ok { color: var(--jade); font-weight: 600; } .report-msg.err { color: var(--red); font-weight: 600; }
 .finish-wrap { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: var(--s1); }
+
+/* Exam-practice quote (implied meaning / function items) */
+blockquote.exq { margin: 0 0 var(--s3); padding: var(--s3) var(--s4); border-left: 4px solid var(--blue); background: var(--blue-tint); border-radius: 0 var(--r-sm) var(--r-sm) 0; font-family: var(--font-display); font-size: var(--fs-md); line-height: 1.5; }
+blockquote.exq .clip-t { font-family: var(--font-body); font-size: var(--fs-sm); color: var(--ink-3); white-space: nowrap; }

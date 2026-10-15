@@ -171,7 +171,8 @@ const Ex = {
       const k = items.indexOf(item), ans = +item.dataset.answer;
       $$(".opt", item).forEach((o) => { o.disabled = true; o.setAttribute("aria-pressed", String(+o.dataset.i === idx)); if (+o.dataset.i === ans) o.classList.add("correct"); else if (+o.dataset.i === idx) o.classList.add("wrong"); });
       const chosen = $(`.opt[data-i="${idx}"] span:last-child`, item)?.textContent || "";
-      this.feedback(item, idx === ans, idx === ans ? "" : ` You chose “${escHTML(chosen.length > 70 ? chosen.slice(0, 67) + "…" : chosen)}”.`);
+      const ww = $("template.wrongwhy", item), wrongWhy = ww && idx !== ans ? JSON.parse(ww.content.textContent)[idx] : "";
+      this.feedback(item, idx === ans, idx === ans ? "" : ` You chose “${escHTML(chosen.length > 70 ? chosen.slice(0, 67) + "…" : chosen)}”.${wrongWhy ? `</p><p>${wrongWhy}</p><p><b>Why the green answer is right:</b>` : ""}`);
       if (!restoring) { s.a[k] = idx; }
       const answered = Object.keys(s.a).length;
       const score = Object.entries(s.a).filter(([kk, v]) => +items[kk].dataset.answer === v).length;
@@ -470,7 +471,7 @@ const Report = {
       const a = s.a || {}, shown = s.shown || {};
       score = 0; total = items.length;
       const rows = items.map((item, k) => {
-        const q = t === "sort" ? this.text($(".sort-text", item)) : t === "predict" ? this.text($$(".step-line > span:not(.stepno)", item)[0]) : this.text($(".q > span", item));
+        const q = t === "sort" ? this.text($(".sort-text", item)) : t === "predict" ? this.text($$(".step-line > span:not(.stepno)", item)[0]) : [this.text($(".exq", item)), this.text($(".q > span", item))].filter(Boolean).join(" ");
         const opts = $$(".opt", item), ans = +item.dataset.answer, pick = a[k];
         const right = escHTML(this.optText(opts[ans]));
         if (pick == null) return this.row("none", escHTML(q), `<span class="none">Not answered</span>`, right);
