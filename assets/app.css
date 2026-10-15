@@ -860,3 +860,11 @@ details.reveal-words[open] > summary { margin-bottom: var(--s2); }
   .lesson-page .crumbs { margin-left: calc(220px + var(--s6)); }
   .lesson-page .lesson-head { margin-left: calc(220px + var(--s6) - var(--s4) - 6px); }
 }
+
+/* Lesson report (step 7) */
+.report-box { margin-top: var(--s5); border-left: 4px solid var(--pink); }
+.report-row { display: flex; gap: var(--s3); flex-wrap: wrap; }
+.report-row input { flex: 1 1 220px; width: auto; }
+.report-msg { margin: var(--s2) 0 0; min-height: 1.4em; }
+.report-msg.ok { color: var(--jade); font-weight: 600; } .report-msg.err { color: var(--red); font-weight: 600; }
+.finish-wrap { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: var(--s1); }

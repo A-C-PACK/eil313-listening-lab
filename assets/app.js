@@ -222,7 +222,7 @@ const Ex = {
   gap(ex) {
     const s = this.st(ex); s.v ||= {};
     const inputs = $$("input.gap", ex);
-    inputs.forEach((inp, i) => { if (s.v[i] != null) inp.value = s.v[i]; inp.addEventListener("input", () => { s.v[i] = inp.value; inp.classList.remove("correct", "wrong", "almost"); Store.save(); }); inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); check(); } }); });
+    inputs.forEach((inp, i) => { if (s.v[i] != null) inp.value = s.v[i]; inp.addEventListener("input", () => { s.v[i] = inp.value; if (s.r) s.r = s.r.filter((x) => x !== i); inp.classList.remove("correct", "wrong", "almost"); Store.save(); }); inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); check(); } }); });
     const check = (quiet) => {
       let score = 0;
       $$(".item", ex).forEach((item) => {
@@ -241,7 +241,7 @@ const Ex = {
       if (!quiet) { const first = $("input.gap.wrong, input.gap.almost", ex); if (first) first.focus(); }
     };
     $(".check", ex).addEventListener("click", () => check());
-    $(".show", ex).addEventListener("click", () => { inputs.forEach((inp, i) => { if (!inp.classList.contains("correct")) { inp.value = inp.dataset.ans.split("|")[0]; s.v[i] = inp.value; } }); check(true); });
+    $(".show", ex).addEventListener("click", () => { inputs.forEach((inp, i) => { if (!inp.classList.contains("correct")) { inp.value = inp.dataset.ans.split("|")[0]; s.v[i] = inp.value; s.r = [...new Set([...(s.r || []), i])]; } }); check(true); });
     if (s.checked) check(true);
   },
 
@@ -368,12 +368,13 @@ const Lesson = {
     Player.init();
     $(".steps-toggle")?.addEventListener("click", (e) => { const p = $("#steps-panel"); const open = !p.classList.contains("open"); p.classList.toggle("open", open); e.currentTarget.setAttribute("aria-expanded", String(open)); });
     $(".vp-toggle")?.addEventListener("click", () => this.toggleVideo());
-    $(".finish")?.addEventListener("click", (e) => { const next = e.currentTarget.dataset.next; const L = Store.lesson(this.id); L.done = true; L.visited = [...new Set([...(L.visited || []), this.n - 1])]; Store.save(); toast("Lesson finished. Well done!"); setTimeout(() => (location.href = next), 700); });
+    $(".finish")?.addEventListener("click", (e) => { if (e.currentTarget.disabled) return; const next = e.currentTarget.dataset.next; const L = Store.lesson(this.id); L.done = true; L.visited = [...new Set([...(L.visited || []), this.n - 1])]; Store.save(); toast("Lesson finished. Well done!"); setTimeout(() => (location.href = next), 700); });
     window.addEventListener("hashchange", () => this.fromHash(true));
     const L = Store.lesson(this.id);
     if (!/^#step-\d+$/.test(location.hash) && L.step != null && L.step > 0) { history.replaceState(null, "", `#step-${L.step + 1}`); }
     this.fromHash(false);
     this.updatePredCheck();
+    Report.init();
   },
   fromHash(focus) {
     const m = location.hash.match(/^#step-(\d+)$/);
@@ -420,6 +421,182 @@ const Lesson = {
     const opts = $$("[data-ex=prediction] .opt span:last-child").map((s) => s.textContent);
     $(".pc-yours", box).textContent = L.pred != null ? `“${opts[L.pred]}”` : "(you didn't make a prediction)";
     $$(".pc-list li", box).forEach((li) => li.classList.toggle("chosen", (L.pw || []).includes(+li.dataset.i)));
+  },
+};
+
+/* Lesson report: the student types a name and downloads one HTML file with what they did and their answers.
+   "Finish lesson" stays locked until the report is downloaded. Everything is read from the page and the saved state. */
+const Report = {
+  init() {
+    const box = $("[data-report]"); if (!box) return;
+    const L = Store.lesson(Lesson.id), inp = $("[data-report-name]", box), msg = $(".report-msg", box);
+    inp.value = Store.data.name || "";
+    if (L.reported) this.unlock();
+    const go = () => {
+      const name = inp.value.trim().replace(/\s+/g, " ");
+      if (!name) { inp.setAttribute("aria-invalid", "true"); msg.className = "report-msg small err"; msg.textContent = "Please type your name first."; inp.focus(); return; }
+      inp.removeAttribute("aria-invalid");
+      Store.data.name = name; L.reported = Date.now(); Store.save();
+      const file = `EIL313_Lesson-${this.lessonNo()}_${name.normalize("NFKD").replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-") || "student"}.html`;
+      Pages.download(this.html(name), file, "text/html");
+      msg.className = "report-msg small ok"; msg.textContent = `Downloaded “${file}”. Now you can finish the lesson.`;
+      this.unlock();
+    };
+    $(".report-btn", box).addEventListener("click", go);
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } });
+  },
+  unlock() { const f = $(".finish"); if (f) f.disabled = false; const h = $(".finish-hint"); if (h) h.hidden = true; },
+  lessonNo() { return this.text($(".crumbs [aria-current]")).replace(/^Lesson\s*/, ""); },
+
+  text(el) { return el ? el.textContent.replace(/\s+/g, " ").trim() : ""; },
+  title(ex) { const h = $("header h3", ex).cloneNode(true); $(".kind", h)?.remove(); return this.text(h); },
+  optText(o) { return this.text(o.querySelector(":scope > span:last-child") || o); },
+  mark: { ok: "✓", no: "✗", almost: "~", none: "–", shown: "!" },
+  row(m, q, yours, right) {
+    return `<tr class="${m}"><td class="m">${this.mark[m]}</td><td>${q}</td><td>${yours}</td><td>${right}</td></tr>`;
+  },
+  table(rows, heads = ["Question", "Your answer", "Correct answer"]) {
+    return `<table><thead><tr><th class="m"></th>${heads.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+  },
+  para(t) { return t && t.trim() ? `<p class="txt">${escHTML(t.trim()).replace(/\n/g, "<br>")}</p>` : `<p class="none">(nothing written)</p>`; },
+
+  /** One exercise -> { html, score, total, state } (score/total only for auto-checked work). */
+  exercise(ex) {
+    const L = Store.lesson(Lesson.id), s = L.ex[ex.id] || {}, t = ex.dataset.ex, items = $$(":scope > .items > .item", ex);
+    const kind = this.text($("header .kind", ex)), title = escHTML(this.title(ex));
+    let body = "", score = null, total = null, state = "", graded = true;
+
+    if (t === "mc" || t === "sort" || t === "predict") {
+      const a = s.a || {}, shown = s.shown || {};
+      score = 0; total = items.length;
+      const rows = items.map((item, k) => {
+        const q = t === "sort" ? this.text($(".sort-text", item)) : t === "predict" ? this.text($$(".step-line > span:not(.stepno)", item)[0]) : this.text($(".q > span", item));
+        const opts = $$(".opt", item), ans = +item.dataset.answer, pick = a[k];
+        const right = escHTML(this.optText(opts[ans]));
+        if (pick == null) return this.row("none", escHTML(q), `<span class="none">Not answered</span>`, right);
+        if (t === "predict" && !shown[k]) return this.row("none", escHTML(q), escHTML(this.optText(opts[pick])) + ` <span class="none">(did not check)</span>`, right);
+        const ok = pick === ans; if (ok) score++;
+        return this.row(ok ? "ok" : "no", escHTML(q), escHTML(this.optText(opts[pick])), right);
+      });
+      const answered = Object.keys(t === "predict" ? shown : a).length;
+      state = answered === total ? "done" : answered ? "part" : "none";
+      if (t === "predict") graded = false;
+      body = this.table(rows);
+    } else if (t === "gap") {
+      const v = s.v || {}, revealed = s.r || [];
+      let i = 0; score = 0; total = 0; let typed = 0;
+      const rows = items.map((item) => {
+        const c = $(".gapline", item).cloneNode(true), marks = [];
+        $$("input.gap", c).forEach((inp) => {
+          const val = (v[i] || "").trim(), alts = inp.dataset.ans.split("|"), want = alts.map((x) => Ex.norm(x)), nv = Ex.norm(val);
+          let m, html;
+          if (revealed.includes(i)) { m = "shown"; html = `<b class="g shown">${escHTML(alts[0])}</b> <i>(answer shown)</i>`; }
+          else if (!val) { m = "none"; html = `<b class="g none">____</b> → <b>${escHTML(alts[0])}</b>`; }
+          else if (want.includes(nv)) { m = "ok"; html = `<b class="g ok">${escHTML(val)}</b>`; score++; }
+          else { m = want.some((w) => w.length > 3 && Ex.lev(nv, w) === 1) ? "almost" : "no"; html = `<b class="g ${m}"><s>${escHTML(val)}</s></b> → <b>${escHTML(alts[0])}</b>`; }
+          if (val) typed++;
+          marks.push(m); inp.replaceWith(document.createRange().createContextualFragment(html)); i++; total++;
+        });
+        const m = marks.every((x) => x === "ok") ? "ok" : marks.includes("shown") ? "shown" : marks.every((x) => x === "none") ? "none" : marks.some((x) => x === "no") ? "no" : marks.includes("almost") ? "almost" : "no";
+        return `<tr class="${m}"><td class="m">${this.mark[m]}</td><td colspan="3">${c.innerHTML}</td></tr>`;
+      });
+      state = typed === total ? "done" : typed || revealed.length ? "part" : "none";
+      body = `<table><thead><tr><th class="m"></th><th colspan="3">Sentence: your answers, with corrections</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
+      if (typed && !s.checked) body += `<p class="note">The student did not press “Check answers”.</p>`;
+    } else if (t === "match") {
+      const p = s.p || [], tries = s.tries || 0; total = +ex.dataset.total;
+      const lefts = $$('.mbtn[data-side="l"]', ex);
+      score = p.length === total ? Math.max(0, total - tries) : Math.max(0, p.length - tries);
+      const rows = lefts.map((b) => {
+        const i = +b.dataset.i, mean = this.text($(`.mbtn[data-side="r"][data-i="${i}"]`, ex)), ok = p.includes(i);
+        return this.row(ok ? "ok" : "none", escHTML(this.text(b)), ok ? "Matched" : `<span class="none">Not matched</span>`, escHTML(mean));
+      });
+      state = p.length === total ? "done" : p.length ? "part" : "none";
+      body = this.table(rows, ["Word", "Result", "Meaning"]) + `<p class="note">${p.length} of ${total} matched · ${tries} wrong ${tries === 1 ? "try" : "tries"} (each wrong try costs 1 point).</p>`;
+    } else if (t === "order") {
+      const lis = $$(".order-list li", ex), order = s.order || lis.map((li) => +li.dataset.i);
+      const txt = (i) => escHTML(this.text($(`.order-list li[data-i="${i}"] .otext`, ex)));
+      total = lis.length; score = s.total ? order.filter((v, k) => v === k).length : 0;
+      const rows = order.map((v, k) => this.row(!s.total ? "none" : v === k ? "ok" : "no", `${k + 1}`, txt(v), txt(k)));
+      state = s.total ? "done" : s.order ? "part" : "none";
+      body = this.table(rows, ["Position", "Your order", "Correct order"]) + (s.total ? "" : `<p class="note">The student did not press “Check order”.</p>`);
+    } else if (t === "notes" || t === "write") {
+      const tx = s.t || {}; graded = false;
+      const fields = $$("textarea.note", ex).map((ta) => {
+        const lab = this.text($(`label[for="${ta.id}"]`, ex)) || "Your text", val = tx[ta.dataset.key] || "";
+        const wc = val.trim() ? val.trim().split(/\s+/).length : 0;
+        return { html: `<div class="field"><h4>${escHTML(lab)}${t === "write" ? ` <span class="wc">(${wc} words)</span>` : ""}</h4>${this.para(val)}</div>`, filled: !!val.trim() };
+      });
+      const checks = $$("input[type=checkbox]", ex).map((cb) => `<li>${tx[cb.dataset.key] ? "☑" : "☐"} ${escHTML(this.text(cb.parentElement))}</li>`);
+      const n = fields.filter((f) => f.filled).length;
+      state = n === fields.length ? "done" : n ? "part" : "none";
+      body = fields.map((f) => f.html).join("") + (checks.length ? `<h4>Checklist</h4><ul class="chk">${checks.join("")}</ul>` : "");
+    } else if (t === "prediction") {
+      graded = false; const opts = $$(".opt", ex);
+      state = L.pred != null ? "done" : "none";
+      body = L.pred != null ? `<p>Prediction: <b>${escHTML(this.optText(opts[L.pred]))}</b></p>` : `<p class="none">No prediction made.</p>`;
+    } else if (t === "predwords") {
+      graded = false; const chips = $$(".chip", ex), pw = L.pw || [];
+      state = pw.length ? "done" : "none";
+      body = pw.length ? `<p>Chose: <b>${pw.map((i) => escHTML(this.text(chips[i]))).join(", ")}</b></p>` : `<p class="none">No words chosen.</p>`;
+    }
+    const scoreTxt = graded && total ? `<span class="score">${score} / ${total}</span>` : "";
+    const html = `<section class="ex"><h3><span class="kind">${escHTML(kind)}</span> ${title} ${scoreTxt}<span class="state ${state}">${{ done: "Complete", part: "Partly done", none: "Not done" }[state]}</span></h3>${body}</section>`;
+    return { html, score: graded ? score : null, total: graded ? total : null, state };
+  },
+
+  html(name) {
+    const L = Store.lesson(Lesson.id), d = Lesson.data, steps = $$(".step", Lesson.root);
+    let S = 0, T = 0, exDone = 0, exAll = 0;
+    const overview = [], sections = [];
+    steps.forEach((step, i) => {
+      const opened = (L.visited || []).includes(i);
+      let s = 0, t = 0, done = 0, all = 0; const parts = [];
+      $$(".exercise, textarea[data-store], ul.selfcheck", step).forEach((el) => {
+        if (el.matches(".exercise")) {
+          const r = this.exercise(el); parts.push(r.html); all++; if (r.state === "done") done++;
+          if (r.total) { s += r.score; t += r.total; }
+        } else if (el.matches("ul.selfcheck")) {
+          const lab = { yes: "Yes", almost: "Almost", no: "Not yet" };
+          parts.push(`<section class="ex"><h3><span class="kind">Self-check</span> Can you do it?</h3><ul class="sc">${$$("[data-sc]", el).map((li) => `<li><b class="scv ${L.sc[li.dataset.sc] || "none"}">${lab[L.sc[li.dataset.sc]] || "No answer"}</b> ${escHTML(this.text($(".stmt", li)))}</li>`).join("")}</ul></section>`);
+        } else {
+          const k = el.dataset.store.split(":")[1], v = L.notes[el.dataset.store] || "";
+          const lab = k === "warmup" ? "Warm-up ideas (optional)" : /^discuss/.test(k) ? `Discussion question ${+k.slice(7) + 1}: ${this.text($("p", el.closest("li")))}` : this.text($(`label[for="${el.id}"]`));
+          parts.push(`<section class="ex free"><h4>${escHTML(lab)}</h4>${this.para(v)}</section>`);
+        }
+      });
+      S += s; T += t; exDone += done; exAll += all;
+      const name = this.text($("h2", step));
+      overview.push(`<tr><td>${i + 1}. ${escHTML(name)}</td><td class="${opened ? "yes" : "no"}">${opened ? "Yes" : "No"}</td><td>${all ? `${done} / ${all}` : "–"}</td><td>${t ? `${s} / ${t}` : "–"}</td></tr>`);
+      sections.push(`<section class="step"><h2>Step ${i + 1}: ${escHTML(name)}${opened ? "" : ` <span class="state none">Not opened</span>`}</h2>${parts.join("") || `<p class="none">Nothing to record in this step.</p>`}</section>`);
+    });
+    const now = new Date(), pct = T ? Math.round((S / T) * 100) : 0;
+    const when = now.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
+    const title = `EIL313 report: Lesson ${this.lessonNo()}, ${name}`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escHTML(title)}</title><style>
+:root{--ink:#1E1B18;--ink2:#5A534B;--line:#E3D9CB;--blue:#1F4E79;--ok:#1E7550;--okt:#E3F3EA;--no:#B3261E;--not:#FCE9E7;--al:#7D5200;--alt:#FDF1DC;--paper:#FBF7F0}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+main{max-width:900px;margin:0 auto;padding:24px 16px 64px;background:#fff}h1,h2{font-family:Georgia,"Times New Roman",serif;color:var(--blue);line-height:1.2}
+h1{font-size:1.7rem;margin:0 0 4px}h2{font-size:1.3rem;margin:32px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--blue)}h3{font-size:1rem;margin:0 0 8px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}h4{font-size:.95rem;margin:12px 0 4px}
+.who{display:grid;grid-template-columns:auto 1fr;gap:2px 16px;margin:16px 0;padding:12px 16px;background:var(--paper);border-radius:10px}.who dt{font-weight:600;color:var(--ink2)}.who dd{margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:12px;margin:16px 0}.stat{flex:1 1 160px;border:1px solid var(--line);border-radius:10px;padding:10px 14px}.stat b{display:block;font-size:1.5rem;color:var(--blue)}.stat span{color:var(--ink2);font-size:.9rem}
+table{width:100%;border-collapse:collapse;font-size:.92rem;margin:4px 0}th,td{text-align:left;vertical-align:top;padding:6px 8px;border-bottom:1px solid var(--line)}th{background:var(--paper);font-weight:600}
+td.m,th.m{width:28px;text-align:center;font-weight:700}tr.ok td.m{color:var(--ok)}tr.no td.m{color:var(--no)}tr.almost td.m{color:var(--al)}tr.shown td.m{color:var(--al)}tr.none td.m{color:#999}
+td.yes{color:var(--ok);font-weight:600}td.no{color:var(--no);font-weight:600}
+.ex{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:12px 0;break-inside:avoid}.ex.free{padding:8px 14px}.kind{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--ink2);font-weight:700}
+.score{font-weight:700;color:var(--blue)}.state{margin-left:auto;font-size:.8rem;font-weight:600;padding:2px 8px;border-radius:99px}.state.done{background:var(--okt);color:var(--ok)}.state.part{background:var(--alt);color:var(--al)}.state.none{background:var(--not);color:var(--no)}
+.g{padding:0 3px;border-radius:4px}.g.ok{background:var(--okt);color:var(--ok)}.g.no{background:var(--not);color:var(--no)}.g.almost{background:var(--alt);color:var(--al)}.g.shown{background:var(--alt);color:var(--al)}.g.none{color:#999}
+.txt{white-space:normal;background:var(--paper);padding:8px 10px;border-radius:6px;margin:4px 0}.none{color:#888;font-style:italic}.note{font-size:.85rem;color:var(--ink2);margin:6px 0 0}.wc{font-weight:400;color:var(--ink2)}
+ul.chk,ul.sc{list-style:none;padding:0;margin:4px 0}ul.sc li{margin:4px 0}.scv{display:inline-block;min-width:80px}.scv.yes{color:var(--ok)}.scv.almost{color:var(--al)}.scv.no{color:var(--no)}.scv.none{color:#999}
+.key{font-size:.85rem;color:var(--ink2)}@media print{body{background:#fff}main{padding:0}h2{break-after:avoid}}
+</style></head><body><main>
+<h1>Lesson report</h1><p class="key">EIL313 Listening Lab</p>
+<dl class="who"><dt>Student</dt><dd><b>${escHTML(name)}</b></dd><dt>Lesson</dt><dd>${escHTML(this.lessonNo())} ${escHTML(d.title)} (${escHTML(d.speaker)})</dd><dt>Report made</dt><dd>${escHTML(when)}</dd></dl>
+<div class="stats"><div class="stat"><b>${T ? `${S} / ${T}` : "–"}</b><span>auto-checked answers correct${T ? ` (${pct}%)` : ""}</span></div><div class="stat"><b>${exDone} / ${exAll}</b><span>tasks complete</span></div><div class="stat"><b>${(L.visited || []).length} / ${steps.length}</b><span>steps opened</span></div></div>
+<table><thead><tr><th>Step</th><th>Opened</th><th>Tasks complete</th><th>Score</th></tr></thead><tbody>${overview.join("")}</tbody></table>
+<p class="key">✓ correct · ✗ wrong · ~ small spelling mistake · ! answer shown, not typed (not counted as correct) · – not answered. Pause-and-predict items are not counted in the score.</p>
+${sections.join("")}
+</main></body></html>`;
   },
 };
 
